@@ -1,0 +1,345 @@
+const Shipment = require('../model/shipment');
+const Tracking = require('../model/tracking');
+const Customer = require('../model/customer');
+const { generateUniqueTrackingNumber } = require('../utils/helperFunctions');
+
+// 1️⃣ Create Shipment
+exports.createShipment = async (req, res) => {
+  try {
+    if (!req.admin?.isAdmin) {
+      return res.status(403).json({ success: false, message: 'Admin access required' });
+    }
+
+    const { customer, sendersName, receiversName, origin, destination, weight, price, deliveryDate} = req.body;
+console.log(customer, "bad id")
+    const customerid = await Customer.findById(customer);
+    if (!customer || customer.isDeleted) {
+      return res.status(404).json({ success: false, message: 'Customer not found or deleted' });
+    }
+
+    const trackingNumber = await generateUniqueTrackingNumber();
+
+    const shipment = new Shipment({
+      trackingNumber,
+      customer,
+      admin: req.admin._id,
+      sendersName,
+      receiversName,
+      origin,
+      destination,
+      weight,
+      price,
+      deliveryDate
+    });
+
+    // Initial history
+    shipment.history.push({
+      status: shipment.status,
+      location: origin,
+      note: 'Shipment created'
+    });
+
+    await shipment.save();
+
+    // Initial tracking
+    const tracking = new Tracking({
+      shipment: shipment._id,
+      status: shipment.status,
+      location: origin
+    });
+
+    await tracking.save();
+
+    res.status(201).json({
+      success: true,
+      message: 'Shipment created successfully',
+      shipment,
+      tracking
+    });
+
+  } catch (error) {
+    console.error('Error creating shipment:', error);
+    res.status(500).json({ success: false, message: 'Server error', error });
+  }
+};
+
+// 2️⃣ Update Shipment (tracking/history only if status/location changes)
+exports.updateShipment = async (req, res) => {
+  try {
+    // 🔒 Admin authorization check
+    if (!req.admin?.isAdmin) {
+      return res.status(403).json({ success: false, message: 'Admin access required' });
+    }
+
+    const { id } = req.params;
+    const { origin, destination, sendersName, receiversName, weight, price, deliveredAt, status, location, note } = req.body;
+
+    // 🔍 Find shipment
+    const shipment = await Shipment.findOne({ _id: id, isDeleted: false });
+    if (!shipment) {
+      return res.status(404).json({ success: false, message: 'Shipment not found' });
+    }
+
+    // ✅ Track whether timeline should be created
+    let createTracking = false;
+    const historyEntry = {};
+
+    // ✅ Check if status or location actually changed
+    const statusChanged = status && status !== shipment.status;
+    const locationChanged = location && location !== shipment.location;
+
+    // ✏️ Update fields (basic info)
+    if (origin) shipment.origin = origin;
+    if (destination) shipment.destination = destination;
+    if (sendersName) shipment.sendersName = sendersName;
+    if (receiversName) shipment.receiversName = receiversName;
+    if (weight) shipment.weight = weight;
+    if (price) shipment.price = price;
+    if (deliveredAt) shipment.deliveredAt = deliveredAt;
+    if (location) shipment.location = location;
+
+    // 🧩 Create timeline if necessary
+    if (statusChanged || locationChanged) {
+      createTracking = true;
+
+      if (statusChanged) {
+        shipment.status = status;
+        historyEntry.status = status;
+      }
+
+      if (locationChanged) {
+        historyEntry.location = location;
+      }
+
+      historyEntry.note =
+        note ||
+        (statusChanged && locationChanged
+          ? `Status updated to ${status} at ${location}`
+          : statusChanged
+          ? `Status updated to ${status}`
+          : `Location updated to ${location}`);
+
+      historyEntry.updatedAt = new Date();
+      shipment.history.push(historyEntry);
+
+      const tracking = new Tracking({
+        shipment: shipment._id,
+        status: status || shipment.status,
+        location: location || shipment.origin,
+      });
+
+      await tracking.save();
+    }
+
+    // 💾 Save updates
+    await shipment.save();
+
+    // ✅ Response message depending on whether a timeline was created
+    const message = createTracking
+      ? 'Shipment updated successfully with new timeline entry'
+      : 'Shipment details updated successfully';
+
+    res.status(200).json({
+      success: true,
+      message,
+      shipment,
+    });
+  } catch (error) {
+    console.error('Error updating shipment:', error);
+    res.status(500).json({ success: false, message: 'Server error', error });
+  }
+};
+
+
+exports.getShipmentTimeline = async (req, res) => {
+  try {
+    // Ensure only admins can access
+    if (!req.admin || !req.admin.isAdmin) {
+      return res.status(403).json({
+        success: false,
+        message: 'Admin access required',
+      });
+    }
+
+    const { shipmentId } = req.params;
+
+    // Validate ID format
+    if (!shipmentId || shipmentId.length !== 24) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid shipment ID format',
+      });
+    }
+
+    // Find shipment
+    const shipment = await Shipment.findOne({
+      _id: shipmentId,
+      isDeleted: false,
+    })
+      .populate('customer', 'fullName email phone')
+      .populate('admin', 'fullName email');
+
+    if (!shipment) {
+      return res.status(404).json({
+        success: false,
+        message: 'Shipment not found',
+      });
+    }
+
+    // Fetch shipment timeline (tracking updates)
+    const timeline = await Tracking.find({ shipment: shipmentId })
+      .sort({ timestamp: 1 })
+      .lean();
+
+    res.status(200).json({
+      success: true,
+      message: 'Shipment timeline fetched successfully',
+      shipment,
+      timeline,
+    });
+
+  } catch (error) {
+    console.error('Error fetching shipment timeline:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error while fetching shipment timeline',
+      error: error.message,
+    });
+  }
+};
+
+
+// 3️⃣ Delete Shipment (soft delete)
+exports.deleteShipment = async (req, res) => {
+  try {
+    if (!req.admin?.isAdmin) return res.status(403).json({ success: false, message: 'Admin access required' });
+
+    const { id } = req.params;
+    const shipment = await Shipment.findOne({ _id: id });
+    if (!shipment) return res.status(404).json({ success: false, message: 'Shipment not found' });
+
+    shipment.isDeleted = true;
+    await shipment.save();
+
+    res.status(200).json({ success: true, message: 'Shipment deleted successfully' });
+
+  } catch (error) {
+    console.error('Error deleting shipment:', error);
+    res.status(500).json({ success: false, message: 'Server error', error });
+  }
+};
+
+// 4️⃣ Get Shipment Timeline (from Tracking collection)
+
+exports.getShipmentTimeline = async (req, res) => {
+  try {
+    // Ensure only admins can access
+    if (!req.admin || !req.admin.isAdmin) {
+      return res.status(403).json({
+        success: false,
+        message: 'Admin access required',
+      });
+    }
+
+    const { shipmentId } = req.params;
+
+    // Validate ID format
+    if (!shipmentId || shipmentId.length !== 24) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid shipment ID format',
+      });
+    }
+
+    // Find shipment
+    const shipment = await Shipment.findOne({
+      _id: shipmentId,
+      isDeleted: false,
+    })
+      .populate('customer', 'fullName email phone')
+      .populate('admin', 'fullName email');
+
+    if (!shipment) {
+      return res.status(404).json({
+        success: false,
+        message: 'Shipment not found',
+      });
+    }
+
+    // Fetch shipment timeline (tracking updates)
+    const timeline = await Tracking.find({ shipment: shipmentId })
+      .sort({ timestamp: 1 })
+      .lean();
+
+    res.status(200).json({
+      success: true,
+      message: 'Shipment timeline fetched successfully',
+      shipment,
+      timeline,
+    });
+
+  } catch (error) {
+    console.error('Error fetching shipment timeline:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error while fetching shipment timeline',
+      error: error.message,
+    });
+  }
+};
+
+
+// 5️⃣ Get All Shipments (Admin Only)
+exports.getAllShipments = async (req, res) => {
+  try {
+    // Ensure only admins can access this endpoint
+    if (!req.admin || !req.admin.isAdmin) {
+      return res.status(403).json({
+        success: false,
+        message: 'Access denied. Admins only.',
+      });
+    }
+
+    // Find all shipments that are not deleted
+    const shipments = await Shipment.find({ isDeleted: false })
+      .populate('customer', 'fullName email phone')
+      .sort({ createdAt: -1 });
+
+    res.status(200).json({
+      success: true,
+      count: shipments.length,
+      shipments,
+    });
+
+  } catch (error) {
+    console.error('Error fetching shipments:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error while fetching shipments.',
+      error: error.message,
+    });
+  }
+};
+
+
+// ✅ Get All Deleted Shipments
+exports.getDeletedShipments = async (req, res) => {
+  try {
+    if (!req.admin?.isAdmin)
+      return res.status(403).json({ success: false, message: 'Admin access required' });
+
+    const deletedShipments = await Shipment.find({ isDeleted: true }).sort({ deletedAt: -1 });
+
+    res.status(200).json({
+      success: true,
+      count: deletedShipments.length,
+      deletedShipments
+    });
+  } catch (error) {
+    console.error('Error fetching deleted shipments:', error);
+    res.status(500).json({ success: false, message: 'Server error', error });
+  }
+};
+
+
+
