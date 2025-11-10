@@ -17,26 +17,17 @@ const port = process.env.PORT || 3000;
 console.log('Starting server...');
 console.log('MONGODB_URL set:', !!MONGODB_URI);
 
-// CORS Configuration
+// CORS Configuration - MUST be before routes
 app.use(cors({
-  origin: true,
-  credentials: true,
+  origin: '*',
+  credentials: false,
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
-  optionsSuccessStatus: 200,
-  maxAge: 86400
+  optionsSuccessStatus: 200
 }));
 
-app.use((req, res, next) => {
-  res.header('Access-Control-Allow-Origin', '*');
-  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
-  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-  
-  if (req.method === 'OPTIONS') {
-    return res.sendStatus(200);
-  }
-  next();
-});
+// Handle OPTIONS requests explicitly
+app.options('*', cors());
 
 const accessLogStream = fs.createWriteStream(path.join(__dirname, 'access.log'), {flags: 'a'})
 app.use(compression());
@@ -62,9 +53,9 @@ try {
   customerRoute = require("./routes/customer.js");
   shipmentRoute = require("./routes/shipment.js");
   trackRoute = require("./routes/tracking.js");
+  console.log('✓ Routes loaded successfully');
 } catch (err) {
   console.error('Error loading routes:', err.message);
-  // Routes might depend on models, continue anyway
 }
 
 // Apply routes if they loaded
@@ -84,38 +75,36 @@ app.use((err, req, res, next) => {
   res.status(500).json({ error: err.message || 'Internal server error' });
 });
 
-// Start server IMMEDIATELY - do not wait for database
+// Start server IMMEDIATELY
 const server = app.listen(port, () => {
   console.log(`✓ Server running on port ${port}`);
+  console.log(`✓ CORS enabled for all origins`);
   console.log(`✓ Health check: GET /health`);
 });
 
-// Connect to MongoDB ASYNCHRONOUSLY with no blocking
+// Connect to MongoDB asynchronously
 if (MONGODB_URI) {
-  console.log('Connecting to MongoDB (non-blocking)...');
+  console.log('Connecting to MongoDB...');
   
-  // Set connection timeout and retry
   mongoose.set('maxPoolSize', 10);
   mongoose.set('minPoolSize', 2);
   
   mongoose.connect(MONGODB_URI, {
-    serverSelectionTimeoutMS: 30000, // 30 seconds
+    serverSelectionTimeoutMS: 30000,
     socketTimeoutMS: 30000,
     connectTimeoutMS: 30000,
     maxPoolSize: 10,
-    retryWrites: false,
-    retryReads: false
+    retryWrites: false
   })
     .then(() => {
-      console.log('✓ MongoDB connected successfully');
+      console.log('✓ MongoDB connected');
     })
     .catch((err) => {
-      console.error('✗ MongoDB connection failed:', err.message);
-      console.log('⚠ Server running in mode - database operations will fail gracefully');
+      console.error('✗ MongoDB failed:', err.message);
     });
 
   mongoose.connection.on('connected', () => {
-    console.log('✓ Mongoose connected to MongoDB');
+    console.log('✓ Mongoose connected');
   });
 
   mongoose.connection.on('error', (err) => {
@@ -126,19 +115,16 @@ if (MONGODB_URI) {
     console.warn('⚠ MongoDB disconnected');
   });
 } else {
-  console.warn('⚠ MONGODB_URL not set - database features disabled');
+  console.warn('⚠ MONGODB_URL not set');
 }
 
-// Handle server errors
 server.on('error', (err) => {
   console.error('Server error:', err);
 });
 
-// Graceful shutdown
 process.on('SIGTERM', () => {
-  console.log('SIGTERM received, shutting down...');
+  console.log('Shutting down...');
   server.close(() => {
-    console.log('Server closed');
     if (mongoose.connection.readyState !== 0) {
       mongoose.connection.close();
     }
