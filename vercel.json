@@ -14,7 +14,8 @@
   ],
   "env": {
     "MONGODB_URL": "@mongodb_url",
-    "PORT": "@port",
+    "FRONTEND_URL": "@frontend_url",
+    "PORT": "3000",
     "NODE_ENV": "production"
   }
 }

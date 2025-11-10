@@ -11,11 +11,33 @@ const cors = require("cors")
 
 const MONGODB_URI = process.env.MONGODB_URL;
 
-
 const app = express();
-app.use(cors());
 
 const port = process.env.PORT || 3000;
+
+// CORS Configuration
+const allowedOrigins = [
+  'http://localhost:3000',
+  'http://localhost:3004',
+  process.env.FRONTEND_URL || 'http://localhost:3000'
+];
+
+app.use(cors({
+  origin: function (origin, callback) {
+    // Allow requests with no origin (like mobile apps or curl requests)
+    if (!origin) return callback(null, true);
+
+    if (allowedOrigins.includes(origin) || process.env.NODE_ENV !== 'production') {
+      callback(null, true);
+    } else {
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+  optionsSuccessStatus: 200
+}));
 
 // Require and use the routes
 // const userRoute = require("./routes/user");
@@ -36,30 +58,11 @@ app.use(morgan('combined', {stream: accessLogStream}))
 
 app.use(bodyParser.json());
 
-
- 
-  
-app.use((req, res, next) => {
-  res.setHeader("Access-Control-Allow-Origin", "*");
-  res.setHeader(
-    "Access-Control-Allow-Methods",
-    "GET",
-    "POST",
-    "PUT",
-    "PATCH",
-    "DELETE"
-  );
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
-  next();
-});
-
 // app.use("/", userRoute);
 app.use("/auth", authRoute);
 app.use("/customer", customerRoute);
 app.use("/shipment", shipmentRoute)
 app.use("/track", trackRoute)
-
-
 
 // app.use(get404);
 
