@@ -15,26 +15,29 @@ const app = express();
 const port = process.env.PORT || 3000;
 
 console.log('Starting server...');
-console.log('MONGODB_URL set:', !!MONGODB_URI);
 
-// CORS Configuration - MUST be before routes
+// ===== CORS - MUST BE FIRST =====
 app.use(cors({
   origin: '*',
-  credentials: false,
-  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS', 'HEAD'],
   allowedHeaders: ['Content-Type', 'Authorization'],
-  optionsSuccessStatus: 200
+  credentials: false,
+  optionsSuccessStatus: 200,
+  maxAge: 86400
 }));
 
-// Handle OPTIONS requests explicitly
-app.options('*', cors());
+// Handle preflight requests explicitly
+app.options('*', (req, res) => {
+  res.sendStatus(200);
+});
 
+// ===== MIDDLEWARE =====
 const accessLogStream = fs.createWriteStream(path.join(__dirname, 'access.log'), {flags: 'a'})
 app.use(compression());
 app.use(morgan('combined', {stream: accessLogStream}))
 app.use(bodyParser.json());
 
-// Health check endpoint
+// ===== HEALTH CHECK =====
 app.get('/health', (req, res) => {
   const mongoStatus = mongoose.connection.readyState === 1 ? 'connected' : 'disconnected';
   res.status(200).json({ 
@@ -45,7 +48,7 @@ app.get('/health', (req, res) => {
   });
 });
 
-// Routes - load with error handling
+// ===== ROUTES =====
 let authRoute, customerRoute, shipmentRoute, trackRoute;
 
 try {
@@ -53,36 +56,37 @@ try {
   customerRoute = require("./routes/customer.js");
   shipmentRoute = require("./routes/shipment.js");
   trackRoute = require("./routes/tracking.js");
-  console.log('✓ Routes loaded successfully');
+  console.log('✓ Routes loaded');
 } catch (err) {
   console.error('Error loading routes:', err.message);
 }
 
-// Apply routes if they loaded
+// Apply routes
 if (authRoute) app.use("/auth", authRoute);
 if (customerRoute) app.use("/customer", customerRoute);
 if (shipmentRoute) app.use("/shipment", shipmentRoute);
 if (trackRoute) app.use("/track", trackRoute);
 
+// ===== ERROR HANDLERS =====
 // 404 handler
 app.use((req, res) => {
   res.status(404).json({ error: 'Route not found' });
 });
 
-// Error handler
+// Global error handler - MUST be last
 app.use((err, req, res, next) => {
-  console.error('Error:', err);
+  console.error('Error:', err.message);
   res.status(500).json({ error: err.message || 'Internal server error' });
 });
 
-// Start server IMMEDIATELY
+// ===== START SERVER =====
 const server = app.listen(port, () => {
   console.log(`✓ Server running on port ${port}`);
-  console.log(`✓ CORS enabled for all origins`);
-  console.log(`✓ Health check: GET /health`);
+  console.log(`✓ CORS enabled`);
+  console.log(`✓ Health: GET /health`);
 });
 
-// Connect to MongoDB asynchronously
+// ===== MONGODB CONNECTION =====
 if (MONGODB_URI) {
   console.log('Connecting to MongoDB...');
   
