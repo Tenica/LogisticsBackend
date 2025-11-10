@@ -15,14 +15,14 @@ const app = express();
 
 const port = process.env.PORT || 3000;
 
-// CORS Configuration - Allow all origins for now, can be restricted later
+// CORS Configuration
 app.use(cors({
-  origin: true, // Allow all origins
+  origin: true,
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
   optionsSuccessStatus: 200,
-  maxAge: 86400 // 24 hours
+  maxAge: 86400
 }));
 
 // Additional CORS headers as fallback
@@ -30,19 +30,12 @@ app.use((req, res, next) => {
   res.header('Access-Control-Allow-Origin', '*');
   res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
   res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-  res.header('Access-Control-Allow-Credentials', 'true');
   
   if (req.method === 'OPTIONS') {
     return res.sendStatus(200);
   }
   next();
 });
-
-// Require and use the routes
-const authRoute = require("./routes/auth.js");
-const customerRoute = require("./routes/customer.js");
-const shipmentRoute = require("./routes/shipment.js");
-const trackRoute = require("./routes/tracking.js")
 
 const accessLogStream = fs.createWriteStream(path.join(__dirname, 'access.log'),
 {flags: 'a'})
@@ -53,8 +46,38 @@ app.use(bodyParser.json());
 
 // Health check endpoint
 app.get('/health', (req, res) => {
-  res.status(200).json({ status: 'OK', message: 'Server is running' });
+  const mongoStatus = mongoose.connection.readyState === 1 ? 'connected' : 'disconnected';
+  res.status(200).json({ 
+    status: 'OK', 
+    message: 'Server is running',
+    mongodb: mongoStatus,
+    timestamp: new Date().toISOString()
+  });
 });
+
+// Try to connect to MongoDB with timeout
+if (MONGODB_URI) {
+  console.log('Attempting to connect to MongoDB...');
+  mongoose.connect(MONGODB_URI, {
+    connectTimeoutMS: 5000,
+    socketTimeoutMS: 5000,
+  })
+    .then((result) => {
+      console.log('✓ MongoDB connected successfully');
+    })
+    .catch((err) => {
+      console.error('✗ MongoDB connection error:', err.message);
+      console.warn('⚠ Server will continue running without database connection');
+    });
+} else {
+  console.warn('⚠ MONGODB_URL environment variable is not set');
+}
+
+// Require and use the routes
+const authRoute = require("./routes/auth.js");
+const customerRoute = require("./routes/customer.js");
+const shipmentRoute = require("./routes/shipment.js");
+const trackRoute = require("./routes/tracking.js")
 
 // Routes
 app.use("/auth", authRoute);
@@ -62,24 +85,22 @@ app.use("/customer", customerRoute);
 app.use("/shipment", shipmentRoute)
 app.use("/track", trackRoute)
 
-// Start server immediately (don't wait for MongoDB)
-const server = app.listen(port, () => {
-  console.log(`Server running on port ${port}`);
+// 404 handler
+app.use((req, res) => {
+  res.status(404).json({ error: 'Route not found' });
 });
 
-// Connect to MongoDB
-if (MONGODB_URI) {
-  mongoose
-    .connect(MONGODB_URI)
-    .then((result) => {
-      console.log('MongoDB connected successfully');
-    })
-    .catch((err) => {
-      console.error('MongoDB connection error:', err.message);
-    });
-} else {
-  console.warn('MONGODB_URL environment variable is not set');
-}
+// Error handler
+app.use((err, req, res, next) => {
+  console.error('Error:', err);
+  res.status(500).json({ error: err.message || 'Internal server error' });
+});
+
+// Start server immediately
+const server = app.listen(port, () => {
+  console.log(`✓ Server running on port ${port}`);
+  console.log(`✓ Health check: http://localhost:${port}/health`);
+});
 
 // Handle server errors
 server.on('error', (err) => {
