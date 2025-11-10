@@ -46,17 +46,17 @@ const customerRoute = require("./routes/customer.js");
 const shipmentRoute = require("./routes/shipment.js");
 const trackRoute = require("./routes/tracking.js")
 
-
-// const { get404 } = require("./controller/error");
-
 const accessLogStream = fs.createWriteStream(path.join(__dirname, 'access.log'),
 {flags: 'a'})
 
-
 app.use(compression());
 app.use(morgan('combined', {stream: accessLogStream}))
-
 app.use(bodyParser.json());
+
+// Health check endpoint
+app.get('/health', (req, res) => {
+  res.status(200).json({ status: 'OK', message: 'Server is running' });
+});
 
 // app.use("/", userRoute);
 app.use("/auth", authRoute);
@@ -64,14 +64,26 @@ app.use("/customer", customerRoute);
 app.use("/shipment", shipmentRoute)
 app.use("/track", trackRoute)
 
-// app.use(get404);
+// Start server immediately (don't wait for MongoDB)
+const server = app.listen(port, () => {
+  console.log(`Server running on port ${port}`);
+});
 
-mongoose
-  .connect(MONGODB_URI)
-  .then((result) => {
-    app.listen(port);
-    console.log(`Server running on port ${port}`);
-  })
-  .catch((err) => {
-    console.log(err);
-  });
+// Connect to MongoDB
+if (MONGODB_URI) {
+  mongoose
+    .connect(MONGODB_URI)
+    .then((result) => {
+      console.log('MongoDB connected successfully');
+    })
+    .catch((err) => {
+      console.error('MongoDB connection error:', err.message);
+    });
+} else {
+  console.warn('MONGODB_URL environment variable is not set');
+}
+
+// Handle server errors
+server.on('error', (err) => {
+  console.error('Server error:', err);
+});
