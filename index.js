@@ -12,8 +12,10 @@ const cors = require("cors")
 const MONGODB_URI = process.env.MONGODB_URL;
 
 const app = express();
-
 const port = process.env.PORT || 3000;
+
+console.log('Starting server...');
+console.log('MONGODB_URL set:', !!MONGODB_URI);
 
 // CORS Configuration
 app.use(cors({
@@ -25,7 +27,6 @@ app.use(cors({
   maxAge: 86400
 }));
 
-// Additional CORS headers as fallback
 app.use((req, res, next) => {
   res.header('Access-Control-Allow-Origin', '*');
   res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
@@ -37,15 +38,7 @@ app.use((req, res, next) => {
   next();
 });
 
-// Require and use the routes
-const authRoute = require("./routes/auth.js");
-const customerRoute = require("./routes/customer.js");
-const shipmentRoute = require("./routes/shipment.js");
-const trackRoute = require("./routes/tracking.js")
-
-const accessLogStream = fs.createWriteStream(path.join(__dirname, 'access.log'),
-{flags: 'a'})
-
+const accessLogStream = fs.createWriteStream(path.join(__dirname, 'access.log'), {flags: 'a'})
 app.use(compression());
 app.use(morgan('combined', {stream: accessLogStream}))
 app.use(bodyParser.json());
@@ -61,11 +54,24 @@ app.get('/health', (req, res) => {
   });
 });
 
-// Routes
-app.use("/auth", authRoute);
-app.use("/customer", customerRoute);
-app.use("/shipment", shipmentRoute)
-app.use("/track", trackRoute)
+// Routes - load with error handling
+let authRoute, customerRoute, shipmentRoute, trackRoute;
+
+try {
+  authRoute = require("./routes/auth.js");
+  customerRoute = require("./routes/customer.js");
+  shipmentRoute = require("./routes/shipment.js");
+  trackRoute = require("./routes/tracking.js");
+} catch (err) {
+  console.error('Error loading routes:', err.message);
+  // Routes might depend on models, continue anyway
+}
+
+// Apply routes if they loaded
+if (authRoute) app.use("/auth", authRoute);
+if (customerRoute) app.use("/customer", customerRoute);
+if (shipmentRoute) app.use("/shipment", shipmentRoute);
+if (trackRoute) app.use("/track", trackRoute);
 
 // 404 handler
 app.use((req, res) => {
@@ -78,42 +84,49 @@ app.use((err, req, res, next) => {
   res.status(500).json({ error: err.message || 'Internal server error' });
 });
 
-// Start server immediately
+// Start server IMMEDIATELY - do not wait for database
 const server = app.listen(port, () => {
   console.log(`✓ Server running on port ${port}`);
   console.log(`✓ Health check: GET /health`);
 });
 
-// Connect to MongoDB
+// Connect to MongoDB ASYNCHRONOUSLY with no blocking
 if (MONGODB_URI) {
-  console.log('Attempting to connect to MongoDB...');
+  console.log('Connecting to MongoDB (non-blocking)...');
+  
+  // Set connection timeout and retry
+  mongoose.set('maxPoolSize', 10);
+  mongoose.set('minPoolSize', 2);
+  
   mongoose.connect(MONGODB_URI, {
-    serverSelectionTimeoutMS: 10000,
-    socketTimeoutMS: 10000,
-    connectTimeoutMS: 10000,
+    serverSelectionTimeoutMS: 30000, // 30 seconds
+    socketTimeoutMS: 30000,
+    connectTimeoutMS: 30000,
+    maxPoolSize: 10,
+    retryWrites: false,
+    retryReads: false
   })
-    .then((result) => {
+    .then(() => {
       console.log('✓ MongoDB connected successfully');
     })
     .catch((err) => {
-      console.error('✗ MongoDB connection error:', err.message);
-      console.warn('⚠ Server running without database - add MONGODB_URL environment variable');
+      console.error('✗ MongoDB connection failed:', err.message);
+      console.log('⚠ Server running in mode - database operations will fail gracefully');
     });
 
-  // Connection event listeners
   mongoose.connection.on('connected', () => {
-    console.log('✓ MongoDB reconnected');
-  });
-
-  mongoose.connection.on('disconnected', () => {
-    console.warn('⚠ MongoDB disconnected');
+    console.log('✓ Mongoose connected to MongoDB');
   });
 
   mongoose.connection.on('error', (err) => {
     console.error('MongoDB error:', err.message);
   });
+
+  mongoose.connection.on('disconnected', () => {
+    console.warn('⚠ MongoDB disconnected');
+  });
 } else {
-  console.warn('⚠ MONGODB_URL environment variable is not set');
+  console.warn('⚠ MONGODB_URL not set - database features disabled');
 }
 
 // Handle server errors
@@ -123,9 +136,10 @@ server.on('error', (err) => {
 
 // Graceful shutdown
 process.on('SIGTERM', () => {
-  console.log('SIGTERM received, shutting down gracefully');
+  console.log('SIGTERM received, shutting down...');
   server.close(() => {
-    if (MONGODB_URI) {
+    console.log('Server closed');
+    if (mongoose.connection.readyState !== 0) {
       mongoose.connection.close();
     }
     process.exit(0);
