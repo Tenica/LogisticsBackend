@@ -55,35 +55,66 @@ app.get('/health', (req, res) => {
   });
 });
 
-// Try to connect to MongoDB with timeout
+// Database status check middleware
+let mongoConnected = false;
+
+const checkMongoConnection = (req, res, next) => {
+  if (!mongoConnected && MONGODB_URI) {
+    return res.status(503).json({ 
+      error: 'Database not connected yet. Please try again in a moment.' 
+    });
+  }
+  next();
+};
+
+// MongoDB Connection with explicit timeout
 if (MONGODB_URI) {
   console.log('Attempting to connect to MongoDB...');
-  mongoose.connect(MONGODB_URI, {
-    connectTimeoutMS: 5000,
+  
+  const mongooseOptions = {
+    serverSelectionTimeoutMS: 5000,
     socketTimeoutMS: 5000,
-  })
+    connectTimeoutMS: 5000,
+    maxPoolSize: 10,
+    retryWrites: false
+  };
+  
+  mongoose.connect(MONGODB_URI, mongooseOptions)
     .then((result) => {
+      mongoConnected = true;
       console.log('✓ MongoDB connected successfully');
     })
     .catch((err) => {
       console.error('✗ MongoDB connection error:', err.message);
-      console.warn('⚠ Server will continue running without database connection');
+      console.warn('⚠ Server will run in demo mode without database');
     });
+
+  // Connection event listeners
+  mongoose.connection.on('connected', () => {
+    mongoConnected = true;
+    console.log('✓ MongoDB reconnected');
+  });
+
+  mongoose.connection.on('disconnected', () => {
+    mongoConnected = false;
+    console.warn('⚠ MongoDB disconnected');
+  });
 } else {
-  console.warn('⚠ MONGODB_URL environment variable is not set');
+  console.warn('⚠ MONGODB_URL environment variable is not set - running in demo mode');
+  mongoConnected = false;
 }
 
-// Require and use the routes
+// Routes
 const authRoute = require("./routes/auth.js");
 const customerRoute = require("./routes/customer.js");
 const shipmentRoute = require("./routes/shipment.js");
 const trackRoute = require("./routes/tracking.js")
 
-// Routes
+// Apply database check to protected routes only
 app.use("/auth", authRoute);
-app.use("/customer", customerRoute);
-app.use("/shipment", shipmentRoute)
-app.use("/track", trackRoute)
+app.use("/customer", checkMongoConnection, customerRoute);
+app.use("/shipment", checkMongoConnection, shipmentRoute);
+app.use("/track", checkMongoConnection, trackRoute);
 
 // 404 handler
 app.use((req, res) => {
@@ -99,10 +130,20 @@ app.use((err, req, res, next) => {
 // Start server immediately
 const server = app.listen(port, () => {
   console.log(`✓ Server running on port ${port}`);
-  console.log(`✓ Health check: http://localhost:${port}/health`);
+  console.log(`✓ Health check: GET /health`);
 });
 
 // Handle server errors
 server.on('error', (err) => {
   console.error('Server error:', err);
+  process.exit(1);
+});
+
+// Graceful shutdown
+process.on('SIGTERM', () => {
+  console.log('SIGTERM received, shutting down gracefully');
+  server.close(() => {
+    mongoose.connection.close();
+    process.exit(0);
+  });
 });
