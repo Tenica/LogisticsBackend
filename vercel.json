@@ -11,11 +11,5 @@
       "src": "/(.*)",
       "dest": "index.js"
     }
-  ],
-  "env": {
-    "MONGODB_URL": "@MONGODB_URL",
-    "FRONTEND_URL": "@FRONTEND_URL",
-    "PORT": "3000",
-    "NODE_ENV": "production"
-  }
+  ]
 }
