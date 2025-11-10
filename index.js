@@ -37,20 +37,7 @@ app.use(morgan('combined', {stream: accessLogStream}))
 app.use(bodyParser.json());
 
 
- const allowedOrigins = ['http://localhost:3000', 'http://localhost:3004'];
-
-  app.use(cors({
-    origin: function (origin, callback) {
-      if (allowedOrigins.includes(origin) || !origin) {
-        callback(null, true);
-      } else {
-        callback(new Error('Not allowed by CORS'));
-      }
-    },
-    credentials: true,
-    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'],
-    allowedHeaders: ['Content-Type', 'Authorization']
-  }));
+ 
   
 app.use((req, res, next) => {
   res.setHeader("Access-Control-Allow-Origin", "*");
