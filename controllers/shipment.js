@@ -214,7 +214,7 @@ exports.deleteShipment = async (req, res) => {
   try {
     if (!req.admin?.isAdmin) return res.status(403).json({ success: false, message: 'Admin access required' });
 
-    const { id } = req.params;
+    const id  = req.params;
     const shipment = await Shipment.findOne({ _id: id });
     if (!shipment) return res.status(404).json({ success: false, message: 'Shipment not found' });
 
