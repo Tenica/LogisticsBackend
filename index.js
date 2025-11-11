@@ -10,6 +10,7 @@ const port = process.env.PORT || 3000;
 
 console.log('=== Backend Starting ===');
 console.log('MONGODB_URL set:', !!process.env.MONGODB_URL);
+console.log('JSON_SECRET_KEY set:', !!process.env.JSON_SECRET_KEY);
 
 // ===== MIDDLEWARE =====
 app.use(bodyParser.json());
@@ -48,12 +49,30 @@ let authRoute, customerRoute, shipmentRoute, trackRoute;
 
 try {
   authRoute = require("./routes/auth.js");
-  customerRoute = require("./routes/customer.js");
-  shipmentRoute = require("./routes/shipment.js");
-  trackRoute = require("./routes/tracking.js");
-  console.log('✓ Routes loaded successfully');
+  console.log('✓ Auth routes loaded');
 } catch (err) {
-  console.error('✗ Error loading routes:', err.message);
+  console.error('✗ Error loading auth routes:', err.message);
+}
+
+try {
+  customerRoute = require("./routes/customer.js");
+  console.log('✓ Customer routes loaded');
+} catch (err) {
+  console.error('✗ Error loading customer routes:', err.message);
+}
+
+try {
+  shipmentRoute = require("./routes/shipment.js");
+  console.log('✓ Shipment routes loaded');
+} catch (err) {
+  console.error('✗ Error loading shipment routes:', err.message);
+}
+
+try {
+  trackRoute = require("./routes/tracking.js");
+  console.log('✓ Tracking routes loaded');
+} catch (err) {
+  console.error('✗ Error loading tracking routes:', err.message);
 }
 
 // ===== APPLY ROUTES =====
@@ -62,19 +81,16 @@ if (customerRoute) app.use("/customer", customerRoute);
 if (shipmentRoute) app.use("/shipment", shipmentRoute);
 if (trackRoute) app.use("/track", trackRoute);
 
-// Fallback auth endpoints if routes fail
+// Fallback endpoints if routes fail
 if (!authRoute) {
   app.post('/auth/login-admin', (req, res) => {
-    res.status(503).json({ error: 'Auth service unavailable' });
-  });
-  app.post('/auth/create-admin', (req, res) => {
     res.status(503).json({ error: 'Auth service unavailable' });
   });
 }
 
 // ===== ERROR HANDLERS =====
 app.use((req, res) => {
-  res.status(404).json({ error: 'Route not found' });
+  res.status(404).json({ error: 'Route not found', path: req.path });
 });
 
 app.use((err, req, res, next) => {
