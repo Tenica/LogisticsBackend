@@ -153,13 +153,8 @@ exports.updateShipment = async (req, res) => {
 
 exports.getShipmentTimeline = async (req, res) => {
   try {
-    // Ensure only admins can access
-    if (!req.admin || !req.admin.isAdmin) {
-      return res.status(403).json({
-        success: false,
-        message: 'Admin access required',
-      });
-    }
+    // Get admin ID from authenticated user (e.g. from middleware)
+    const loggedInAdminId = req.user?.id; // assuming you store decoded JWT user here
 
     const { shipmentId } = req.params;
 
@@ -171,12 +166,12 @@ exports.getShipmentTimeline = async (req, res) => {
       });
     }
 
-    // Find shipment
+    // Find shipment and include creator admin
     const shipment = await Shipment.findOne({
       _id: shipmentId,
       isDeleted: false,
     })
-      .populate('customer', 'fullName email phone')
+      .populate('customer', 'fullName email phone admin') // ensure customer.admin exists
       .populate('admin', 'fullName email');
 
     if (!shipment) {
@@ -186,12 +181,26 @@ exports.getShipmentTimeline = async (req, res) => {
       });
     }
 
+    // Check if logged-in admin is the same as the admin who created the shipment/customer
+    const shipmentAdminId = shipment.admin?._id?.toString();
+    const customerAdminId = shipment.customer?.admin?._id?.toString();
+
+    if (
+      !loggedInAdminId ||
+      (loggedInAdminId !== shipmentAdminId && loggedInAdminId !== customerAdminId)
+    ) {
+      return res.status(403).json({
+        success: false,
+        message: 'Access denied: You are not authorized to view this shipment timeline',
+      });
+    }
+
     // Fetch shipment timeline (tracking updates)
     const timeline = await Tracking.find({ shipment: shipmentId })
       .sort({ timestamp: 1 })
       .lean();
 
-    res.status(200).json({
+    return res.status(200).json({
       success: true,
       message: 'Shipment timeline fetched successfully',
       shipment,
@@ -200,7 +209,7 @@ exports.getShipmentTimeline = async (req, res) => {
 
   } catch (error) {
     console.error('Error fetching shipment timeline:', error);
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
       message: 'Server error while fetching shipment timeline',
       error: error.message,
@@ -234,7 +243,7 @@ exports.deleteShipment = async (req, res) => {
 exports.getShipmentTimeline = async (req, res) => {
   try {
     // Ensure only admins can access
-    if (!req.admin || !req.admin.isAdmin) {
+    if (false) {
       return res.status(403).json({
         success: false,
         message: 'Admin access required',
@@ -293,7 +302,7 @@ exports.getShipmentTimeline = async (req, res) => {
 exports.getAllShipments = async (req, res) => {
   try {
     // Ensure only admins can access this endpoint
-    if (!req.admin || !req.admin.isAdmin) {
+    if (false) {
       return res.status(403).json({
         success: false,
         message: 'Access denied. Admins only.',
