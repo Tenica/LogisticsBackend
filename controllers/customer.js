@@ -48,22 +48,31 @@ exports.createCustomer = async (req, res) => {
 // Update a customer
 exports.updateCustomer = async (req, res) => {
   try {
-    const { id } = req.params;
+    const loggedInAdminId = req.admin?._id || req.user?._id;
 
-    // Ensure only admin can update
-    if (!req.admin?.isAdmin) {
+    // 🔒 Admin authorization check
+    if (!loggedInAdminId) {
       return res.status(403).json({ success: false, message: 'Admin access required' });
     }
 
+    const { id } = req.params;
     const { fullName, phone, email, address, city, country } = req.body;
 
-    // Find the customer
-    const customer = await Customer.findOne({ _id: id, isDeleted: false });
+    // 🔍 Find customer owned by this admin
+    const customer = await Customer.findOne({
+      _id: id,
+      createdBy: loggedInAdminId,  // ownership check
+      isDeleted: false
+    });
+
     if (!customer) {
-      return res.status(404).json({ success: false, message: 'Customer not found' });
+      return res.status(404).json({
+        success: false,
+        message: 'Customer not found or you are not authorized to update it',
+      });
     }
 
-    // Update fields if provided
+    // ✏️ Update fields if provided
     if (fullName) customer.fullName = fullName;
     if (phone) customer.phone = phone;
     if (email) customer.email = email;
@@ -78,19 +87,26 @@ exports.updateCustomer = async (req, res) => {
       message: 'Customer updated successfully',
       customer
     });
+
   } catch (error) {
     console.error('Error updating customer:', error);
-    res.status(500).json({ success: false, message: 'Server error', error });
+    res.status(500).json({
+      success: false,
+      message: 'Server error while updating customer',
+      error: error.message
+    });
   }
 };
 
 
 
+
 exports.deleteCustomer = async (req, res) => {
-   
   try {
-    // 🔒 Admin check
-    if (!req.admin?.isAdmin) {
+    const loggedInAdminId = req.admin?._id || req.user?._id;
+
+    // 🔒 Admin authorization check
+    if (!loggedInAdminId) {
       return res.status(403).json({
         success: false,
         message: 'Admin access required',
@@ -98,26 +114,30 @@ exports.deleteCustomer = async (req, res) => {
     }
 
     const customerId = req.params.id;
-     console.log(customerId, "customerId")
 
-    // 🔍 Find the customer
-    const customer = await Customer.findById(customerId);
-      console.log(customer, "customer")
-    if (!customer || customer.isDeleted) {
+    // 🔍 Find customer owned by this admin
+    const customer = await Customer.findOne({
+      _id: customerId,
+      createdBy: loggedInAdminId,
+      isDeleted: false,
+    });
+
+    if (!customer) {
       return res.status(404).json({
         success: false,
-        message: 'Customer not found or already deleted',
+        message: 'Customer not found, already deleted, or you are not authorized to delete it',
       });
     }
 
     // 🚫 Soft-delete the customer
     customer.isDeleted = true;
+    customer.deletedAt = new Date(); // optional if using deletedAt
     await customer.save();
 
-    // 🚛 Also soft-delete all shipments for this customer
+    // 🚛 Soft-delete shipments of this customer **created by this admin**
     const result = await Shipment.updateMany(
-      { customer: customerId },
-      { $set: { isDeleted: true } }
+      { customer: customerId, admin: loggedInAdminId, isDeleted: false },
+      { $set: { isDeleted: true, deletedAt: new Date() } }
     );
 
     res.status(200).json({
@@ -135,7 +155,6 @@ exports.deleteCustomer = async (req, res) => {
     });
   }
 };
-
 
 
 exports.getCustomersByAdmin = async (req, res) => {
@@ -169,6 +188,7 @@ exports.getCustomersByAdmin = async (req, res) => {
 
 // Get a single customer by ID
 exports.getCustomerById = async (req, res) => {
+    const loggedInAdminId = req.admin?._id;
   try {
     // ✅ Only admin can view customer details
     if (!req.admin?.isAdmin) {
@@ -181,7 +201,7 @@ exports.getCustomerById = async (req, res) => {
     const { id } = req.params;
 
     // ✅ Find the customer by ID but exclude deleted ones
-    const customer = await Customer.findOne({ _id: id, isDeleted: false })
+    const customer = await Customer.findOne({ _id: id, isDeleted: false, createdBy:loggedInAdminId})
       .populate('createdBy', 'fullName email') // optional: show admin info
       .select('-__v'); // optional: hide version field
 
@@ -207,62 +227,86 @@ exports.getCustomerById = async (req, res) => {
 };
 
 
-// ✅ Get All Deleted Customers
-exports.getDeletedCustomers = async (req, res) => {
-    try {
-      if (!req.admin?.isAdmin)
-        return res.status(403).json({ success: false, message: 'Admin access required' });
 
-      const deletedCustomers = await Customer.find({ isDeleted: true }).sort({ deletedAt: -1 });
-      console.log("deletedcustomers", deletedCustomers)
-      res.status(200).json({
-        success: true,
-        count: deletedCustomers.length,
-        customers: deletedCustomers  // ✅ Changed from deletedCustomers to customers
-      });
-    } catch (error) {
-      console.error('Error fetching deleted customers:', error);
-      res.status(500).json({ success: false, message: 'Server error', error });
+// ✅ Get All Deleted Customers (Only for the logged-in admin)
+exports.getDeletedCustomers = async (req, res) => {
+  try {
+    const loggedInAdminId = req.admin?._id;
+
+    // 🔒 Admin authorization check
+    if (!loggedInAdminId) {
+      return res.status(403).json({ success: false, message: 'Admin access required' });
     }
-  };
+
+    // Fetch only deleted customers created by this admin
+    const deletedCustomers = await Customer.find({
+      isDeleted: true,
+      createdBy: loggedInAdminId, // filter by admin ownership
+    }).sort({ deletedAt: -1 });
+
+    // Response
+    res.status(200).json({
+      success: true,
+      count: deletedCustomers.length,
+      customers: deletedCustomers, // returning under "customers" key
+    });
+
+  } catch (error) {
+    console.error('Error fetching deleted customers:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error while fetching deleted customers',
+      error: error.message,
+    });
+  }
+};
+
 
 
 // ✅ Restore (Undo Delete) Customer and all their deleted shipments
  exports.restoreCustomer = async (req, res) => {
+  try {
+    const loggedInAdminId = req.admin?._id;
 
-    try {
-      if (!req.admin?.isAdmin) {
-        return res.status(403).json({ success: false, message: 'Admin access required' });
-      }
-
-      const id = req.params.id;
-      console.log("idee", id)
-
-      // Find and restore the customer
-      const customer = await Customer.findByIdAndUpdate(
-        id,
-        { isDeleted: false },
-        { new: true }
-      );
-
-      if (!customer) {
-        return res.status(404).json({ success: false, message: 'Customer not found' });
-      }
-
-      // Also restore all soft-deleted shipments for this customer
-      await Shipment.updateMany(
-        { customer: id },
-        { $set: { isDeleted: false } }
-      );
-
-      res.status(200).json({
-        success: true,
-        message: 'Customer restored successfully',
-        customer
-      });
-    } catch (error) {
-      console.error('Error restoring customer:', error);
-      res.status(500).json({ success: false, message: 'Server error', error: error.message });
+    // 🔒 Admin authorization check
+    if (!loggedInAdminId) {
+      return res.status(403).json({ success: false, message: 'Admin access required' });
     }
-  };
 
+    const id = req.params.id;
+
+    // Find customer owned by this admin
+    const customer = await Customer.findOneAndUpdate(
+      { _id: id, admin: loggedInAdminId, isDeleted: true }, // ownership + deleted
+      { isDeleted: false },
+      { new: true }
+    );
+
+    if (!customer) {
+      return res.status(404).json({
+        success: false,
+        message: 'Customer not found or you are not authorized to restore it',
+      });
+    }
+
+    // Restore all soft-deleted shipments for this customer **created by this admin**
+    await Shipment.updateMany(
+      { customer: id, admin: loggedInAdminId, isDeleted: true },
+      { $set: { isDeleted: false } }
+    );
+
+    res.status(200).json({
+      success: true,
+      message: 'Customer restored successfully',
+      customer
+    });
+
+  } catch (error) {
+    console.error('Error restoring customer:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error while restoring customer',
+      error: error.message
+    });
+  }
+};
