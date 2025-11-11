@@ -277,7 +277,7 @@ exports.getDeletedCustomers = async (req, res) => {
 
     // Find customer owned by this admin
     const customer = await Customer.findOneAndUpdate(
-      { _id: id, admin: loggedInAdminId, isDeleted: true }, // ownership + deleted
+      { _id: id, createdBy: loggedInAdminId, isDeleted: true }, // ownership + deleted
       { isDeleted: false },
       { new: true }
     );
