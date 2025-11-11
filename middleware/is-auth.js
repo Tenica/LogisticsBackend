@@ -3,55 +3,20 @@ const Admin = require('../model/admin')
 
 const isAuth = async (req, res, next) => {
     try {
-        const authHeader = req?.headers?.authorization;
-        console.log('Auth Header:', authHeader);
-        
-        if (!authHeader) {
-            return res.status(401).json({ error: 'No authorization header' });
+        const token = req?.headers?.authorization?.split(' ')[1];
+        const decoded = jwt.verify(token, process.env.JSON_SECRET_KEY)
+        const admin = await Admin.findOne({ _id: decoded._id, 'tokens.token': token })
+        if (!admin) {
+            throw new Error()
         }
         
-        const token = authHeader.split(' ')[1];
-        console.log('Token:', token);
-        
-        if (!token) {
-            return res.status(401).json({ error: 'No token provided' });
-        }
-        
-        const secret = process.env.JSON_SECRET_KEY;
-        console.log('Secret exists:', !!secret);
-        
-        if (!secret) {
-            console.warn('JSON_SECRET_KEY not set, allowing request anyway');
-            // Allow request if secret not set (for development)
-            req.token = token;
-            req.admin = { _id: 'temp', isAdmin: true };
-            return next();
-        }
-        
-        try {
-            const decoded = jwt.verify(token, secret);
-            console.log('Token decoded:', decoded);
-            
-            const admin = await Admin.findOne({ _id: decoded._id, 'tokens.token': token });
-            console.log('Admin found:', !!admin);
-            
-            if (!admin) {
-                return res.status(401).json({ error: 'Admin not found' });
-            }
-            
-            req.token = token;
-            req.admin = admin;
-            next();
-        } catch (verifyErr) {
-            console.error('JWT verify error:', verifyErr.message);
-            // If JWT verification fails, still allow the request (for development)
-            req.token = token;
-            req.admin = { _id: 'temp', isAdmin: true };
-            next();
-        }
+        req.token = token
+        req.admin = admin
+        next()
     } catch (e) {
-        console.error('Auth middleware error:', e.message);
-        res.status(401).json({ error: 'Please authenticate.' });
+        console.log("the error", e)
+        console.log('Authorization Header:', req.header('Authorization'));
+        res.status(401).send({ error: 'Please authenticate.' })
     }
 }
 
