@@ -3,7 +3,7 @@ const Shipment = require('../model/shipment');
 
 /**
  * Generate a truly unique tracking number.
- * Format: TRK-ABCDE12345
+ * Format: MSL-ABCDE12345
  */
 exports.generateUniqueTrackingNumber = async () => {
   let trackingNumber;
@@ -12,7 +12,7 @@ exports.generateUniqueTrackingNumber = async () => {
   while (!isUnique) {
     // Generate a random hex string
     const randomHex = crypto.randomBytes(5).toString('hex').toUpperCase();
-    trackingNumber = `TRK-${randomHex}`;
+    trackingNumber = `MSL-${randomHex}`;
 
     // Check if tracking number already exists in DB
     const existing = await Shipment.findOne({ trackingNumber });
