@@ -15,10 +15,6 @@ app.use(cors({
   optionsSuccessStatus: 200
 }));
 
-app.options('*', (req, res) => {
-  res.sendStatus(200);
-});
-
 // ===== MIDDLEWARE =====
 app.use(bodyParser.json());
 
