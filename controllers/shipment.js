@@ -323,7 +323,7 @@ exports.deleteShipment = async (req, res) => {
 exports.getAllShipments = async (req, res) => {
   try {
     // Get logged-in admin ID (from your auth middleware)
-    const loggedInAdminId = req.user?.id;
+    const loggedInAdminId = req.admin?.id;
 
     // Ensure user is authenticated
     if (!loggedInAdminId) {
