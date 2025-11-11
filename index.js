@@ -40,7 +40,21 @@ try {
 
 app.use(bodyParser.json());
 
-// ===== ENDPOINTS =====
+// ===== ROOT ENDPOINT =====
+app.get('/', (req, res) => {
+  res.status(200).json({ 
+    message: 'Logistics Backend API',
+    status: 'running',
+    version: '1.0.0',
+    endpoints: {
+      health: 'GET /health',
+      auth: 'POST /auth/login-admin, POST /auth/create-admin',
+      customers: 'GET /customer',
+      shipments: 'GET /shipment',
+      tracking: 'GET /track'
+    }
+  });
+});
 
 // Health check
 app.get('/health', (req, res) => {
@@ -76,15 +90,12 @@ const trackRoute = loadRoute("./routes/tracking.js", "tracking");
 
 // ===== APPLY ROUTES =====
 if (authRoute) {
-  app.use("/auth", (err, req, res, next) => {
-    if (err) {
-      console.error('Auth route error:', err.message);
-      return res.status(500).json({ error: 'Internal server error' });
-    }
-    next();
-  }, authRoute);
+  app.use("/auth", authRoute);
 } else {
   app.post("/auth/login-admin", (req, res) => {
+    res.status(503).json({ error: 'Auth service unavailable' });
+  });
+  app.post("/auth/create-admin", (req, res) => {
     res.status(503).json({ error: 'Auth service unavailable' });
   });
 }
@@ -95,7 +106,7 @@ if (trackRoute) app.use("/track", trackRoute);
 
 // ===== ERROR HANDLERS =====
 app.use((req, res) => {
-  res.status(404).json({ error: 'Route not found' });
+  res.status(404).json({ error: 'Route not found', path: req.path });
 });
 
 app.use((err, req, res, next) => {
@@ -108,6 +119,7 @@ try {
   const server = app.listen(port, () => {
     console.log(`✓ Server listening on port ${port}`);
     console.log(`✓ CORS enabled for all origins`);
+    console.log(`✓ Root endpoint: GET /`);
     console.log(`✓ Health endpoint: GET /health`);
   });
 
